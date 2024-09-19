@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import * as core from "@actions/core";
-import OpenAI from "openai";
+import { Configuration, OpenAIApi } from "openai";
 import { Octokit } from "@octokit/rest";
 import parseDiff, { Chunk, File } from "parse-diff";
 import minimatch from "minimatch";
@@ -11,9 +11,10 @@ const OPENAI_API_MODEL: string = core.getInput("OPENAI_API_MODEL");
 
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
-const openai = new OpenAI({
+const configuration = new Configuration({
   apiKey: OPENAI_API_KEY,
 });
+const openai = new OpenAIApi(configuration);
 
 interface PRDetails {
   owner: string;
@@ -79,18 +80,12 @@ async function analyzeCode(
 }
 
 function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
-  return `Your task is to review pull requests. Instructions:
-- Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comment>"}]}
-- Do not give positive comments or compliments.
-- Provide comments and suggestions ONLY if there is something to improve, otherwise "reviews" should be an empty array.
-- Write the comment in GitHub Markdown format.
-- Use the given description only for the overall context and only comment the code.
-- IMPORTANT: NEVER suggest adding comments to the code.
+  return `You are an AI assistant that provides code reviews. When given a code diff and PR details, you provide code reviews by calling the 'provide_code_review' function.
 
 Review the following code diff in the file "${
     file.to
   }" and take the pull request title and description into account when writing the response.
-  
+
 Pull request title: ${prDetails.title}
 Pull request description:
 
@@ -103,17 +98,21 @@ Git diff to review:
 \`\`\`diff
 ${chunk.content}
 ${chunk.changes
-  // @ts-expect-error - ln and ln2 exists where needed
-  .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
-  .join("\n")}
+    // @ts-expect-error - ln and ln2 exists where needed
+    .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
+    .join("\n")}
 \`\`\`
 `;
 }
 
-async function getAIResponse(prompt: string): Promise<Array<{
-  lineNumber: string;
-  reviewComment: string;
-}> | null> {
+async function getAIResponse(
+  prompt: string
+): Promise<
+  Array<{
+    lineNumber: number;
+    reviewComment: string;
+  }> | null
+> {
   const queryConfig = {
     model: OPENAI_API_MODEL,
     temperature: 0.2,
@@ -123,23 +122,63 @@ async function getAIResponse(prompt: string): Promise<Array<{
     presence_penalty: 0,
   };
 
-  try {
-    const response = await openai.chat.completions.create({
-      ...queryConfig,
-      // return JSON if the model supports it:
-      ...(OPENAI_API_MODEL === "gpt-4-1106-preview"
-        ? { response_format: { type: "json_object" } }
-        : {}),
-      messages: [
-        {
-          role: "system",
-          content: prompt,
+  // Define the function schema
+  const functions = [
+    {
+      name: "provide_code_review",
+      description: "Provide code reviews for a given code diff.",
+      parameters: {
+        type: "object",
+        properties: {
+          reviews: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                lineNumber: {
+                  type: "integer",
+                  description:
+                    "The line number in the diff where the review comment applies.",
+                },
+                reviewComment: {
+                  type: "string",
+                  description: "The review comment.",
+                },
+              },
+              required: ["lineNumber", "reviewComment"],
+            },
+          },
         },
-      ],
+        required: ["reviews"],
+      },
+    },
+  ];
+
+  try {
+    const messages = [
+      {
+        role: "user",
+        content: prompt,
+      },
+    ];
+
+    const response = await openai.createChatCompletion({
+      ...queryConfig,
+      messages: messages,
+      functions: functions,
+      function_call: "auto",
     });
 
-    const res = response.choices[0].message?.content?.trim() || "{}";
-    return JSON.parse(res).reviews;
+    const message = response.data.choices[0].message;
+
+    if (message?.function_call) {
+      const args = JSON.parse(message.function_call.arguments);
+      return args.reviews;
+    } else {
+      // Assistant did not call the function
+      console.error("Assistant did not call the function.");
+      return null;
+    }
   } catch (error) {
     console.error("Error:", error);
     return null;
@@ -150,7 +189,7 @@ function createComment(
   file: File,
   chunk: Chunk,
   aiResponses: Array<{
-    lineNumber: string;
+    lineNumber: number;
     reviewComment: string;
   }>
 ): Array<{ body: string; path: string; line: number }> {
@@ -161,7 +200,7 @@ function createComment(
     return {
       body: aiResponse.reviewComment,
       path: file.to,
-      line: Number(aiResponse.lineNumber),
+      line: aiResponse.lineNumber,
     };
   });
 }
