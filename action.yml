@@ -1,4 +1,4 @@
-name: "AI Code Review Action"
+name: "AI Code Review Action with o1"
 description: "Perform code reviews and comment on diffs using OpenAI API."
 inputs:
   GITHUB_TOKEN:
@@ -10,7 +10,7 @@ inputs:
   OPENAI_API_MODEL:
     description: "OpenAI API model."
     required: false
-    default: "gpt-4"
+    default: "o1-mini"
   exclude:
     description: "Glob patterns to exclude files from the diff analysis"
     required: false
