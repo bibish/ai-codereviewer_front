@@ -2,12 +2,13 @@ import { readFileSync } from "fs";
 import * as core from "@actions/core";
 import OpenAI from "openai";
 import { Octokit } from "@octokit/rest";
-import parseDiff, { Chunk, File, Change } from "parse-diff";
+import parseDiff, { Chunk, File } from "parse-diff";
 import minimatch from "minimatch";
 
 const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
 const OPENAI_API_KEY: string = core.getInput("OPENAI_API_KEY");
 const OPENAI_API_MODEL = core.getInput("OPENAI_API_MODEL");
+const PROMPT_TEMPLATE = core.getInput("prompt_template");
 
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
@@ -89,42 +90,11 @@ function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
     })
     .join("\n");
 
-  return `Your task is to review pull requests. Instructions:
-- Provide a JSON array of review comments in the following format. Return the JSON inside a markdown code block:
-  \`\`\`json
-  {
-    "reviews": [
-      {
-        "lineNumber": "Line number where the issue is found",
-        "reviewComment": "Your review comment"
-      }
-    ]
-  }
-  \`\`\`
-- Only provide the JSON output inside the code block and nothing else.
-- Do not give positive comments or compliments, be critical, include funny emojis.
-- IMPORTANT: only comment for performance, typo, or best practices. Not on possible side effect.
-- Write the comment in GitHub Markdown format.
-- Always propose a code solution to the issue.
-- Don't check package imports.
-- Don't suggest adding comments.
-
-Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
-
-Pull request title: ${prDetails.title}
-Pull request description:
-
----
-${prDetails.description}
----
-
-Git diff to review:
-
-\`\`\`diff
-${chunk.content}
-${diffContent}
-\`\`\`
-`;
+  return PROMPT_TEMPLATE.replace("${file.to}", file.to)
+    .replace("${prDetails.title}", prDetails.title)
+    .replace("${prDetails.description}", prDetails.description)
+    .replace("${chunk.content}", chunk.content)
+    .replace("${diffContent}", diffContent);
 }
 
 function fixInvalidEscapeSequences(jsonString: string): string {
