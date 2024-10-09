@@ -51,6 +51,7 @@ const minimatch_1 = __importDefault(__nccwpck_require__(2002));
 const GITHUB_TOKEN = core.getInput("GITHUB_TOKEN");
 const OPENAI_API_KEY = core.getInput("OPENAI_API_KEY");
 const OPENAI_API_MODEL = core.getInput("OPENAI_API_MODEL");
+const PROMPT_TEMPLATE = core.getInput("prompt_template");
 const octokit = new rest_1.Octokit({ auth: GITHUB_TOKEN });
 const openai = new openai_1.default({
     apiKey: OPENAI_API_KEY,
@@ -100,6 +101,7 @@ function getDiff(owner, repo, pull_number) {
     });
 }
 function createPrompt(file, chunk, prDetails) {
+    var _a;
     const diffContent = chunk.changes
         .map((change) => {
         let lineNumber = "";
@@ -112,42 +114,12 @@ function createPrompt(file, chunk, prDetails) {
         return `${lineNumber} ${change.content}`;
     })
         .join("\n");
-    return `Your task is to review pull requests. Instructions:
-- Provide a JSON array of review comments in the following format. Return the JSON inside a markdown code block:
-  \`\`\`json
-  {
-    "reviews": [
-      {
-        "lineNumber": "Line number where the issue is found",
-        "reviewComment": "Your review comment"
-      }
-    ]
-  }
-  \`\`\`
-- Only provide the JSON output inside the code block and nothing else.
-- Do not give positive comments or compliments, be critical, include funny emojis.
-- IMPORTANT: only comment for performance, typo, or best practices. Not on possible side effect.
-- Write the comment in GitHub Markdown format.
-- Always propose a code solution to the issue.
-- Don't check package imports.
-- Don't suggest adding comments.
-
-Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
-
-Pull request title: ${prDetails.title}
-Pull request description:
-
----
-${prDetails.description}
----
-
-Git diff to review:
-
-\`\`\`diff
-${chunk.content}
-${diffContent}
-\`\`\`
-`;
+    const filePath = (_a = file.to) !== null && _a !== void 0 ? _a : "unknown file";
+    return PROMPT_TEMPLATE.replace("${file.to}", filePath)
+        .replace("${prDetails.title}", prDetails.title)
+        .replace("${prDetails.description}", prDetails.description)
+        .replace("${chunk.content}", chunk.content)
+        .replace("${diffContent}", diffContent);
 }
 function fixInvalidEscapeSequences(jsonString) {
     return jsonString.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");

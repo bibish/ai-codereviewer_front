@@ -90,7 +90,9 @@ function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
     })
     .join("\n");
 
-  return PROMPT_TEMPLATE.replace("${file.to}", file.to)
+  const filePath = file.to ?? "unknown file";
+
+  return PROMPT_TEMPLATE.replace("${file.to}", filePath)
     .replace("${prDetails.title}", prDetails.title)
     .replace("${prDetails.description}", prDetails.description)
     .replace("${chunk.content}", chunk.content)
@@ -101,14 +103,10 @@ function fixInvalidEscapeSequences(jsonString: string): string {
   return jsonString.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
 }
 
-async function getAIResponse(
-  prompt: string
-): Promise<
-  Array<{
-    lineNumber: string;
-    reviewComment: string;
-  }> | null
-> {
+async function getAIResponse(prompt: string): Promise<Array<{
+  lineNumber: string;
+  reviewComment: string;
+}> | null> {
   const queryConfig = {
     model: OPENAI_API_MODEL,
     top_p: 1,
